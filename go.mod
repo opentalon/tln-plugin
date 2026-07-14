@@ -1,18 +1,18 @@
 module github.com/opentalon/talon-plugin
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/opentalon/opentalon v0.0.18
-	github.com/opentalon/talon-language v0.2.1
+	github.com/opentalon/talon-language v0.5.1
 )
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241015192408-796eee8c2d53 // indirect
-	google.golang.org/grpc v1.69.4 // indirect
-	google.golang.org/protobuf v1.36.8 // indirect
+	golang.org/x/net v0.51.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

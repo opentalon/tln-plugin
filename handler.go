@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -34,7 +35,7 @@ type config struct {
 	// set; otherwise the API can't store anything it accepts.
 	RulesDir string `json:"rules_dir"`
 
-	// AdminToken guards the admin HTTP API (rule CRUD + facts seed).
+	// AdminToken guards the admin HTTP API (rule CRUD).
 	// Every request must carry `Authorization: Bearer <token>` with a
 	// matching value. Empty disables the admin API entirely — without
 	// a token there's no auth model, so we refuse to serve.
@@ -78,7 +79,7 @@ func (h *handler) Configure(configJSON string) error {
 	case port != "" && h.cfg.AdminToken == "":
 		// Inverse: host granted HTTP but no token. We refuse to serve
 		// an auth-less API on principle — there's no audience for
-		// uncredentialed mutation of rules and facts.
+		// uncredentialed mutation of rules.
 		slog.Warn("talon-plugin: OPENTALON_HTTP_PORT granted but no admin_token in config; admin API refused (set admin_token to enable)")
 	case port != "" && h.cfg.AdminToken != "":
 		if err := h.startAdminServer(port); err != nil {
@@ -89,20 +90,15 @@ func (h *handler) Configure(configJSON string) error {
 }
 
 // startAdminServer launches the management HTTP server in a goroutine.
-// Wires the fact store from datalevin_url so /facts/* round-trips
-// against the same backend the LLM-driven detect rules use.
+// It hosts the rule CRUD API only — talon-plugin is a language gateway,
+// not a data store, so it does not expose a fact-seeding API.
 func (h *handler) startAdminServer(port string) error {
 	if h.cfg.RulesDir == "" {
 		return fmt.Errorf("rules_dir is required when admin_token is set")
 	}
-	var facts talon.FactStore
-	if h.cfg.DatalevinURL != "" {
-		facts = talon.NewFactStore(h.cfg.DatalevinURL)
-	}
 	admin := &adminServer{
 		token: h.cfg.AdminToken,
 		rules: &ruleStore{RootDir: h.cfg.RulesDir},
-		facts: facts,
 	}
 	srv := &http.Server{
 		Addr:              "127.0.0.1:" + port,
@@ -135,6 +131,19 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 					},
 				},
 			},
+			{
+				Name:        "check",
+				Description: "Validate Talon source without executing it (lex → parse → resolve → validate → plan). Returns {\"ok\":true} for valid source, or the compile diagnostics for invalid source. No MCP calls, no side effects — safe for validating machine-generated source before storing or running it.",
+				ReadOnly:    true,
+				Parameters: []plugin.ParameterMsg{
+					{
+						Name:        "workflow",
+						Description: "Talon source to validate.",
+						Type:        "string",
+						Required:    true,
+					},
+				},
+			},
 		},
 		SystemPromptAddition: workflowToolDoc,
 		SupportsCallbacks:    true,
@@ -157,9 +166,18 @@ func (h *handler) Execute(req plugin.Request) plugin.Response {
 // the talon runtime uses to dispatch each `mcp "<server>" "<tool>"`
 // step back through the host's orchestrator.
 func (h *handler) ExecuteWithCallbacks(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
-	if req.Action != "execute_workflow" {
+	switch req.Action {
+	case "execute_workflow":
+		return h.execWorkflow(ctx, req, host)
+	case "check":
+		// check is a pure compile — no MCP, no HostCaller needed.
+		return h.execCheck(req)
+	default:
 		return plugin.Response{CallID: req.ID, Error: "unknown action: " + req.Action}
 	}
+}
+
+func (h *handler) execWorkflow(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
 	src := req.Args["workflow"]
 	if src == "" {
 		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass a Talon workflow block as a string"}
@@ -183,6 +201,38 @@ func (h *handler) ExecuteWithCallbacks(ctx context.Context, req plugin.Request, 
 		CallID:            req.ID,
 		Content:           content,
 		StructuredContent: structured,
+	}
+}
+
+// execCheck validates Talon source without executing it. Invalid source
+// is a normal result (reported as diagnostics), not an RPC error — the
+// caller (e.g. an LLM authoring a program) relays the diagnostics and
+// retries. Pure compile: no HostCaller, no MCP, no side effects.
+func (h *handler) execCheck(req plugin.Request) plugin.Response {
+	src := req.Args["workflow"]
+	if src == "" {
+		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass Talon source as a string"}
+	}
+
+	err := talon.Check(src, talon.WithFilename("check:"+req.ID))
+	if err == nil {
+		return plugin.Response{
+			CallID:            req.ID,
+			Content:           "ok: source is valid Talon.",
+			StructuredContent: `{"ok":true}`,
+		}
+	}
+
+	payload := map[string]any{"ok": false, "error": err.Error()}
+	var ce *talon.CompileError
+	if errors.As(err, &ce) {
+		payload["stage"] = ce.Stage
+	}
+	structured, _ := json.Marshal(payload)
+	return plugin.Response{
+		CallID:            req.ID,
+		Content:           err.Error(),
+		StructuredContent: string(structured),
 	}
 }
 
