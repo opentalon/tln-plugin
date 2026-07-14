@@ -144,6 +144,15 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 					},
 				},
 			},
+			{
+				Name:        "evaluate",
+				Description: "Reactively evaluate Talon source against a set of facts. Hydrates a session from the prior snapshot, asserts the new facts, fires any matching on-blocks (running their workflow bodies — including MCP steps), and returns which blocks fired plus the updated snapshot. Stateless: all state is carried in the request. Used to run event-driven watchers a tick at a time.",
+				Parameters: []plugin.ParameterMsg{
+					{Name: "source", Description: "Talon source, typically containing on-blocks and the workflows they fire.", Type: "string", Required: true},
+					{Name: "facts", Description: `JSON array of facts to assert, e.g. [{"record_id":"1","attribute":"current_stock","value":8}].`, Type: "string", Required: true},
+					{Name: "snapshot", Description: `Optional prior store snapshot to hydrate before asserting, e.g. {"1":{"current_stock":15}}. Re-asserting an unchanged value fires nothing.`, Type: "string", Required: false},
+				},
+			},
 		},
 		SystemPromptAddition: workflowToolDoc,
 		SupportsCallbacks:    true,
@@ -172,6 +181,8 @@ func (h *handler) ExecuteWithCallbacks(ctx context.Context, req plugin.Request, 
 	case "check":
 		// check is a pure compile — no MCP, no HostCaller needed.
 		return h.execCheck(req)
+	case "evaluate":
+		return h.execEvaluate(ctx, req, host)
 	default:
 		return plugin.Response{CallID: req.ID, Error: "unknown action: " + req.Action}
 	}
@@ -232,6 +243,110 @@ func (h *handler) execCheck(req plugin.Request) plugin.Response {
 	return plugin.Response{
 		CallID:            req.ID,
 		Content:           err.Error(),
+		StructuredContent: string(structured),
+	}
+}
+
+// evalFact is one fact to assert, as received in the `facts` JSON arg.
+type evalFact struct {
+	RecordID  string `json:"record_id"`
+	Attribute string `json:"attribute"`
+	Value     any    `json:"value"`
+}
+
+// evalFiring is one fired on-block, as returned in the `evaluate` result.
+type evalFiring struct {
+	OnBlock string `json:"on_block"`
+	Ref     string `json:"ref,omitempty"`
+	RefKind string `json:"ref_kind,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type evalResponse struct {
+	OK       bool                   `json:"ok"`
+	Firings  []evalFiring           `json:"firings"`
+	Snapshot map[int]map[string]any `json:"snapshot"`
+}
+
+// execEvaluate reactively evaluates Talon source against a set of facts.
+// It hydrates a fresh session from the prior snapshot (so re-asserting an
+// unchanged value fires nothing), asserts the new facts, runs any matching
+// on-blocks (their workflow bodies dispatch MCP steps back through the
+// host), and returns which blocks fired plus the updated snapshot. Fully
+// stateless: no session is persisted between calls — the caller carries
+// the snapshot. talon-plugin stays agent-agnostic; this is a generic
+// reactive-evaluation primitive.
+func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
+	src := req.Args["source"]
+	if src == "" {
+		return plugin.Response{CallID: req.ID, Error: "source argument is required; pass Talon source as a string"}
+	}
+
+	var factsIn []evalFact
+	if raw := req.Args["facts"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &factsIn); err != nil {
+			return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("facts must be a JSON array of {record_id,attribute,value}: %v", err)}
+		}
+	}
+	facts := make([]talon.Fact, 0, len(factsIn))
+	for _, f := range factsIn {
+		facts = append(facts, talon.Fact{RecordID: f.RecordID, Attribute: f.Attribute, Value: f.Value})
+	}
+
+	// Hydrate a fresh store from the prior snapshot BEFORE creating the
+	// session, so replaying already-known facts fires nothing.
+	store := talon.NewMemoryStore()
+	if raw := req.Args["snapshot"]; raw != "" && raw != "{}" {
+		var snap map[string]map[string]any
+		if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+			return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("snapshot must be a JSON object of {record_id:{attr:value}}: %v", err)}
+		}
+		var hydrate []talon.Fact
+		for id, attrs := range snap {
+			for attr, val := range attrs {
+				hydrate = append(hydrate, talon.Fact{RecordID: id, Attribute: attr, Value: val})
+			}
+		}
+		if len(hydrate) > 0 {
+			if err := store.Assert(ctx, hydrate); err != nil {
+				return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: hydrate snapshot: %v", err)}
+			}
+		}
+	}
+
+	s, err := talon.NewSession(src,
+		talon.WithMCP(&talonCaller{host: host}),
+		talon.WithFactStore(store),
+		talon.WithFilename("eval:"+req.ID))
+	if err != nil {
+		// Invalid source (should have been caught by `check` at authoring time).
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: %v", err)}
+	}
+	defer s.Close()
+
+	slog.Info("talon-plugin: evaluate", "call_id", req.ID, "facts", len(facts), "source_len", len(src))
+
+	firings, err := s.Assert(ctx, facts)
+	if err != nil {
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: assert: %v", err)}
+	}
+
+	out := evalResponse{OK: true, Firings: make([]evalFiring, 0, len(firings)), Snapshot: s.Snapshot()}
+	for _, f := range firings {
+		ef := evalFiring{OnBlock: f.OnBlock, Ref: f.Ref, RefKind: f.RefKind}
+		if f.Err != nil {
+			ef.Error = f.Err.Error()
+		}
+		out.Firings = append(out.Firings, ef)
+	}
+
+	structured, err := json.Marshal(out)
+	if err != nil {
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: encode result: %v", err)}
+	}
+	return plugin.Response{
+		CallID:            req.ID,
+		Content:           fmt.Sprintf("Evaluated: %d firing(s).", len(out.Firings)),
 		StructuredContent: string(structured),
 	}
 }
