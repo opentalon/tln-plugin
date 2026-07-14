@@ -15,8 +15,8 @@ import (
 	"github.com/opentalon/talon-language/pkg/talon"
 )
 
-//go:embed workflow_tool.txt
-var workflowToolDoc string
+//go:embed talon_language.txt
+var talonDoc string
 
 // config is the JSON shape this plugin accepts from the host's
 // `plugins.<name>.config:` block. All fields are optional.
@@ -154,7 +154,7 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 				},
 			},
 		},
-		SystemPromptAddition: workflowToolDoc,
+		SystemPromptAddition: talonDoc,
 		SupportsCallbacks:    true,
 	}
 }
