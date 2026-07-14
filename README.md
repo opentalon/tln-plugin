@@ -6,7 +6,7 @@ OpenTalon plugin that executes [Talon](https://github.com/opentalon/talon-langua
 
 ## How it works
 
-1. The LLM sees the `talon-plugin.execute_workflow(workflow)` tool plus a system-prompt addition explaining the Talon DSL.
+1. The LLM sees the `talon-plugin.execute_workflow(workflow)` tool plus a system-prompt addition explaining the Talon DSL. A companion `talon-plugin.check(workflow)` action validates source without executing it (`talon.Check`) — it returns `{"ok":true}` or the compile diagnostics, so any caller authoring machine-generated Talon can validate before storing or running.
 2. For a batch request ("delete all Test items"), the LLM emits a single tool call whose argument is a Talon `workflow "..." { step "..." { mcp "..." "..." { ... } } }` block.
 3. The host dispatches the call to this plugin over the existing plugin gRPC connection using **bidirectional streaming** (`ExecuteBidi`) — the same Unix socket the host already uses to call the plugin, no new transport.
 4. The plugin compiles the workflow via [`talon-language/pkg/talon.RunWorkflow`](https://github.com/opentalon/talon-language/tree/master/pkg/talon) and runs it.
@@ -16,7 +16,7 @@ OpenTalon plugin that executes [Talon](https://github.com/opentalon/talon-langua
 ## Requirements
 
 - **OpenTalon host >= v0.0.18** — the bidi `ExecuteBidi` RPC and the `supports_callbacks` capability flag were added in that release.
-- **talon-language >= v0.2.0** — `pkg/talon.Run` + the `FactStore` interface.
+- **talon-language >= v0.5.1** — `pkg/talon.Run` / `RunWorkflow` / `Check` + the `FactStore` interface.
 - For Datalevin-backed programs (`detect`, queries, ML primitives): a reachable [datalevin-server](https://github.com/opentalon/talon-language/tree/master/datalevin-server). Without one, the plugin still runs workflow-only programs.
 
 ## Config

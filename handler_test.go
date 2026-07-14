@@ -92,11 +92,47 @@ func TestCapabilities(t *testing.T) {
 	if !caps.SupportsCallbacks {
 		t.Error("SupportsCallbacks must be true for this plugin")
 	}
-	if len(caps.Actions) != 1 || caps.Actions[0].Name != "execute_workflow" {
-		t.Errorf("expected one execute_workflow action, got %+v", caps.Actions)
+	got := map[string]bool{}
+	for _, a := range caps.Actions {
+		got[a.Name] = true
+	}
+	if !got["execute_workflow"] || !got["check"] {
+		t.Errorf("expected execute_workflow and check actions, got %+v", caps.Actions)
 	}
 	if !strings.Contains(caps.SystemPromptAddition, "workflow") {
 		t.Error("system_prompt_addition should reference the DSL")
+	}
+}
+
+func TestExecuteCheck(t *testing.T) {
+	h := &handler{}
+
+	// Valid source → ok, no error, structured {"ok":true}.
+	valid := `workflow "ok" { step "s" { mcp "srv" "tool" { x "1" } } }`
+	resp := h.ExecuteWithCallbacks(context.Background(), plugin.Request{ID: "c1", Action: "check", Args: map[string]string{"workflow": valid}}, nil)
+	if resp.Error != "" {
+		t.Fatalf("valid source should not error: %q", resp.Error)
+	}
+	if !strings.Contains(resp.StructuredContent, `"ok":true`) {
+		t.Errorf("valid source structured content: %q", resp.StructuredContent)
+	}
+
+	// Invalid source → no RPC error, but ok:false + diagnostics reported.
+	resp = h.ExecuteWithCallbacks(context.Background(), plugin.Request{ID: "c2", Action: "check", Args: map[string]string{"workflow": "workflow \"x\" {"}}, nil)
+	if resp.Error != "" {
+		t.Fatalf("invalid source is a normal result, not an RPC error: %q", resp.Error)
+	}
+	if !strings.Contains(resp.StructuredContent, `"ok":false`) {
+		t.Errorf("invalid source should report ok:false, got %q", resp.StructuredContent)
+	}
+	if resp.Content == "" {
+		t.Error("invalid source should return diagnostics in content")
+	}
+
+	// Missing arg → RPC error.
+	resp = h.ExecuteWithCallbacks(context.Background(), plugin.Request{ID: "c3", Action: "check", Args: map[string]string{}}, nil)
+	if resp.Error == "" {
+		t.Error("missing workflow arg should error")
 	}
 }
 
