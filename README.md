@@ -38,7 +38,7 @@ The host auto-fetches, builds, and pins the binary via `plugins.lock`. When `exp
 
 ## Admin HTTP API
 
-When `admin_token` is set in the config block and the host has granted HTTP (`expose_http: true`), the plugin starts a management HTTP server on `OPENTLN_HTTP_PORT`. Every request requires `Authorization: Bearer <admin_token>`; missing or wrong tokens return `401`.
+When `admin_token` is set in the config block and the host has granted HTTP (`expose_http: true`), the plugin starts a management HTTP server on `OPENTALON_HTTP_PORT`. Every request requires `Authorization: Bearer <admin_token>`; missing or wrong tokens return `401`.
 
 | Method | Path | Purpose |
 |---|---|---|
