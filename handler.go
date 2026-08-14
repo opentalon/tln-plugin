@@ -12,24 +12,24 @@ import (
 	"time"
 
 	"github.com/opentalon/opentalon/pkg/plugin"
-	"github.com/opentalon/talon-language/pkg/talon"
+	"github.com/opentalon/tln-language/pkg/tln"
 )
 
-//go:embed talon_language.txt
-var talonDoc string
+//go:embed tln_language.txt
+var tlnDoc string
 
 // config is the JSON shape this plugin accepts from the host's
 // `plugins.<name>.config:` block. All fields are optional.
 type config struct {
 	// DatalevinURL points at a Datalevin HTTP server. When set, the
-	// plugin uses talon.Run (full language: workflow + detect + queries
+	// plugin uses tln.Run (full language: workflow + detect + queries
 	// + ML primitives). When empty, only workflow-only programs run
-	// via talon.RunWorkflow — detect-bearing programs return
+	// via tln.RunWorkflow — detect-bearing programs return
 	// ErrRequiresFactStore from the SDK.
 	DatalevinURL string `json:"datalevin_url"`
 
-	// RulesDir is the filesystem path where preauthored Talon rules
-	// live (one .talon file per rule). The admin HTTP API reads and
+	// RulesDir is the filesystem path where preauthored Tln rules
+	// live (one .tln file per rule). The admin HTTP API reads and
 	// writes here; rules loaded at startup become advertised actions
 	// (the rules loader is a follow-up). Required when admin_token is
 	// set; otherwise the API can't store anything it accepts.
@@ -45,7 +45,7 @@ type config struct {
 // handler implements pkg/plugin.StreamingHandler. The plugin advertises
 // SupportsCallbacks=true so the host dispatches over the bidirectional
 // ExecuteBidi stream and passes a live HostCaller — that's how every
-// MCP step inside a Talon program flows back through the host's
+// MCP step inside a Tln program flows back through the host's
 // expert system (executeCall → policy → observability → credentials).
 type handler struct {
 	cfg config
@@ -53,44 +53,44 @@ type handler struct {
 
 // Configure parses the host-supplied config block. Empty configJSON is
 // valid — the plugin runs in workflow-only mode. Side effect: starts
-// the admin HTTP server in a goroutine when both OPENTALON_HTTP_PORT
+// the admin HTTP server in a goroutine when both OPENTLN_HTTP_PORT
 // (set by the host's plugin loader) and admin_token (from this config)
 // are present. The server outlives Configure; it shuts down when the
 // process exits alongside the gRPC server.
 func (h *handler) Configure(configJSON string) error {
 	if configJSON != "" {
 		if err := json.Unmarshal([]byte(configJSON), &h.cfg); err != nil {
-			return fmt.Errorf("talon-plugin: parse config: %w", err)
+			return fmt.Errorf("tln-plugin: parse config: %w", err)
 		}
 	}
 	if h.cfg.DatalevinURL != "" {
-		slog.Info("talon-plugin: datalevin backend configured", "url", h.cfg.DatalevinURL)
+		slog.Info("tln-plugin: datalevin backend configured", "url", h.cfg.DatalevinURL)
 	} else {
-		slog.Info("talon-plugin: workflow-only mode (no datalevin_url configured)")
+		slog.Info("tln-plugin: workflow-only mode (no datalevin_url configured)")
 	}
 
-	port := os.Getenv("OPENTALON_HTTP_PORT")
+	port := os.Getenv("OPENTLN_HTTP_PORT")
 	switch {
 	case port == "" && h.cfg.AdminToken != "":
 		// Operator gave us a token but no HTTP grant from the host —
 		// the API is unreachable. Loud warning so the misconfiguration
 		// is obvious, but don't error (gRPC still works).
-		slog.Warn("talon-plugin: admin_token set but OPENTALON_HTTP_PORT not granted; admin API disabled")
+		slog.Warn("tln-plugin: admin_token set but OPENTLN_HTTP_PORT not granted; admin API disabled")
 	case port != "" && h.cfg.AdminToken == "":
 		// Inverse: host granted HTTP but no token. We refuse to serve
 		// an auth-less API on principle — there's no audience for
 		// uncredentialed mutation of rules.
-		slog.Warn("talon-plugin: OPENTALON_HTTP_PORT granted but no admin_token in config; admin API refused (set admin_token to enable)")
+		slog.Warn("tln-plugin: OPENTLN_HTTP_PORT granted but no admin_token in config; admin API refused (set admin_token to enable)")
 	case port != "" && h.cfg.AdminToken != "":
 		if err := h.startAdminServer(port); err != nil {
-			return fmt.Errorf("talon-plugin: admin server: %w", err)
+			return fmt.Errorf("tln-plugin: admin server: %w", err)
 		}
 	}
 	return nil
 }
 
 // startAdminServer launches the management HTTP server in a goroutine.
-// It hosts the rule CRUD API only — talon-plugin is a language gateway,
+// It hosts the rule CRUD API only — tln-plugin is a language gateway,
 // not a data store, so it does not expose a fact-seeding API.
 func (h *handler) startAdminServer(port string) error {
 	if h.cfg.RulesDir == "" {
@@ -106,9 +106,9 @@ func (h *handler) startAdminServer(port string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		slog.Info("talon-plugin: admin server listening", "addr", srv.Addr, "rules_dir", h.cfg.RulesDir)
+		slog.Info("tln-plugin: admin server listening", "addr", srv.Addr, "rules_dir", h.cfg.RulesDir)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("talon-plugin: admin server", "error", err)
+			slog.Error("tln-plugin: admin server", "error", err)
 		}
 	}()
 	return nil
@@ -116,16 +116,16 @@ func (h *handler) startAdminServer(port string) error {
 
 func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 	return plugin.CapabilitiesMsg{
-		Name:        "talon-plugin",
-		Description: "Executes Talon workflow blocks — deterministic multi-step MCP chains generated by the LLM for batch operations.",
+		Name:        "tln-plugin",
+		Description: "Executes Tln workflow blocks — deterministic multi-step MCP chains generated by the LLM for batch operations.",
 		Actions: []plugin.ActionMsg{
 			{
 				Name:        "execute_workflow",
-				Description: "Execute a Talon workflow block as a single atomic operation. See system_prompt_addition for the DSL syntax and examples.",
+				Description: "Execute a Tln workflow block as a single atomic operation. See system_prompt_addition for the DSL syntax and examples.",
 				Parameters: []plugin.ParameterMsg{
 					{
 						Name:        "workflow",
-						Description: "Talon workflow source: a single `workflow \"...\" { step \"...\" { mcp \"<server>\" \"<tool>\" { ... } } }` block.",
+						Description: "Tln workflow source: a single `workflow \"...\" { step \"...\" { mcp \"<server>\" \"<tool>\" { ... } } }` block.",
 						Type:        "string",
 						Required:    true,
 					},
@@ -133,12 +133,12 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 			},
 			{
 				Name:        "check",
-				Description: "Validate Talon source without executing it (lex → parse → resolve → validate → plan). Returns {\"ok\":true} for valid source, or the compile diagnostics for invalid source. No MCP calls, no side effects — safe for validating machine-generated source before storing or running it.",
+				Description: "Validate Tln source without executing it (lex → parse → resolve → validate → plan). Returns {\"ok\":true} for valid source, or the compile diagnostics for invalid source. No MCP calls, no side effects — safe for validating machine-generated source before storing or running it.",
 				ReadOnly:    true,
 				Parameters: []plugin.ParameterMsg{
 					{
 						Name:        "workflow",
-						Description: "Talon source to validate.",
+						Description: "Tln source to validate.",
 						Type:        "string",
 						Required:    true,
 					},
@@ -146,15 +146,15 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 			},
 			{
 				Name:        "evaluate",
-				Description: "Reactively evaluate Talon source against a set of facts. Hydrates a session from the prior snapshot, asserts the new facts, fires any matching on-blocks (running their workflow bodies — including MCP steps), and returns which blocks fired plus the updated snapshot. Stateless: all state is carried in the request. Used to run event-driven watchers a tick at a time.",
+				Description: "Reactively evaluate Tln source against a set of facts. Hydrates a session from the prior snapshot, asserts the new facts, fires any matching on-blocks (running their workflow bodies — including MCP steps), and returns which blocks fired plus the updated snapshot. Stateless: all state is carried in the request. Used to run event-driven watchers a tick at a time.",
 				Parameters: []plugin.ParameterMsg{
-					{Name: "source", Description: "Talon source, typically containing on-blocks and the workflows they fire.", Type: "string", Required: true},
+					{Name: "source", Description: "Tln source, typically containing on-blocks and the workflows they fire.", Type: "string", Required: true},
 					{Name: "facts", Description: `JSON array of facts to assert, e.g. [{"record_id":"1","attribute":"current_stock","value":8}].`, Type: "string", Required: true},
 					{Name: "snapshot", Description: `Optional prior store snapshot to hydrate before asserting, e.g. {"1":{"current_stock":15}}. Re-asserting an unchanged value fires nothing.`, Type: "string", Required: false},
 				},
 			},
 		},
-		SystemPromptAddition: talonDoc,
+		SystemPromptAddition: tlnDoc,
 		SupportsCallbacks:    true,
 	}
 }
@@ -167,12 +167,12 @@ func (h *handler) Capabilities() plugin.CapabilitiesMsg {
 func (h *handler) Execute(req plugin.Request) plugin.Response {
 	return plugin.Response{
 		CallID: req.ID,
-		Error:  "talon-plugin requires the host to dispatch over ExecuteBidi (host opentalon >= v0.0.18). The unary path is not supported.",
+		Error:  "tln-plugin requires the host to dispatch over ExecuteBidi (host opentalon >= v0.0.18). The unary path is not supported.",
 	}
 }
 
 // ExecuteWithCallbacks is the bidi path. It receives a live HostCaller
-// the talon runtime uses to dispatch each `mcp "<server>" "<tool>"`
+// the tln runtime uses to dispatch each `mcp "<server>" "<tool>"`
 // step back through the host's orchestrator.
 func (h *handler) ExecuteWithCallbacks(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
 	switch req.Action {
@@ -191,19 +191,19 @@ func (h *handler) ExecuteWithCallbacks(ctx context.Context, req plugin.Request, 
 func (h *handler) execWorkflow(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
 	src := req.Args["workflow"]
 	if src == "" {
-		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass a Talon workflow block as a string"}
+		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass a Tln workflow block as a string"}
 	}
 
-	slog.Info("talon-plugin: execute_workflow",
+	slog.Info("tln-plugin: execute_workflow",
 		"call_id", req.ID,
 		"workflow_len", len(src),
 		"datalevin", h.cfg.DatalevinURL != "")
 
-	result, err := h.runTalon(ctx, src, req.ID, host)
+	result, err := h.runTln(ctx, src, req.ID, host)
 	if err != nil {
 		return plugin.Response{
 			CallID: req.ID,
-			Error:  fmt.Sprintf("talon-plugin: %v", err),
+			Error:  fmt.Sprintf("tln-plugin: %v", err),
 		}
 	}
 
@@ -215,27 +215,27 @@ func (h *handler) execWorkflow(ctx context.Context, req plugin.Request, host plu
 	}
 }
 
-// execCheck validates Talon source without executing it. Invalid source
+// execCheck validates Tln source without executing it. Invalid source
 // is a normal result (reported as diagnostics), not an RPC error — the
 // caller (e.g. an LLM authoring a program) relays the diagnostics and
 // retries. Pure compile: no HostCaller, no MCP, no side effects.
 func (h *handler) execCheck(req plugin.Request) plugin.Response {
 	src := req.Args["workflow"]
 	if src == "" {
-		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass Talon source as a string"}
+		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass Tln source as a string"}
 	}
 
-	err := talon.Check(src, talon.WithFilename("check:"+req.ID))
+	err := tln.Check(src, tln.WithFilename("check:"+req.ID))
 	if err == nil {
 		return plugin.Response{
 			CallID:            req.ID,
-			Content:           "ok: source is valid Talon.",
+			Content:           "ok: source is valid Tln.",
 			StructuredContent: `{"ok":true}`,
 		}
 	}
 
 	payload := map[string]any{"ok": false, "error": err.Error()}
-	var ce *talon.CompileError
+	var ce *tln.CompileError
 	if errors.As(err, &ce) {
 		payload["stage"] = ce.Stage
 	}
@@ -268,18 +268,18 @@ type evalResponse struct {
 	Snapshot map[int]map[string]any `json:"snapshot"`
 }
 
-// execEvaluate reactively evaluates Talon source against a set of facts.
+// execEvaluate reactively evaluates Tln source against a set of facts.
 // It hydrates a fresh session from the prior snapshot (so re-asserting an
 // unchanged value fires nothing), asserts the new facts, runs any matching
 // on-blocks (their workflow bodies dispatch MCP steps back through the
 // host), and returns which blocks fired plus the updated snapshot. Fully
 // stateless: no session is persisted between calls — the caller carries
-// the snapshot. talon-plugin stays agent-agnostic; this is a generic
+// the snapshot. tln-plugin stays agent-agnostic; this is a generic
 // reactive-evaluation primitive.
 func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plugin.HostCaller) plugin.Response {
 	src := req.Args["source"]
 	if src == "" {
-		return plugin.Response{CallID: req.ID, Error: "source argument is required; pass Talon source as a string"}
+		return plugin.Response{CallID: req.ID, Error: "source argument is required; pass Tln source as a string"}
 	}
 
 	var factsIn []evalFact
@@ -288,47 +288,47 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 			return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("facts must be a JSON array of {record_id,attribute,value}: %v", err)}
 		}
 	}
-	facts := make([]talon.Fact, 0, len(factsIn))
+	facts := make([]tln.Fact, 0, len(factsIn))
 	for _, f := range factsIn {
-		facts = append(facts, talon.Fact{RecordID: f.RecordID, Attribute: f.Attribute, Value: f.Value})
+		facts = append(facts, tln.Fact{RecordID: f.RecordID, Attribute: f.Attribute, Value: f.Value})
 	}
 
 	// Hydrate a fresh store from the prior snapshot BEFORE creating the
 	// session, so replaying already-known facts fires nothing.
-	store := talon.NewMemoryStore()
+	store := tln.NewMemoryStore()
 	if raw := req.Args["snapshot"]; raw != "" && raw != "{}" {
 		var snap map[string]map[string]any
 		if err := json.Unmarshal([]byte(raw), &snap); err != nil {
 			return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("snapshot must be a JSON object of {record_id:{attr:value}}: %v", err)}
 		}
-		var hydrate []talon.Fact
+		var hydrate []tln.Fact
 		for id, attrs := range snap {
 			for attr, val := range attrs {
-				hydrate = append(hydrate, talon.Fact{RecordID: id, Attribute: attr, Value: val})
+				hydrate = append(hydrate, tln.Fact{RecordID: id, Attribute: attr, Value: val})
 			}
 		}
 		if len(hydrate) > 0 {
 			if err := store.Assert(ctx, hydrate); err != nil {
-				return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: hydrate snapshot: %v", err)}
+				return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("tln-plugin: hydrate snapshot: %v", err)}
 			}
 		}
 	}
 
-	s, err := talon.NewSession(src,
-		talon.WithMCP(&talonCaller{host: host}),
-		talon.WithFactStore(store),
-		talon.WithFilename("eval:"+req.ID))
+	s, err := tln.NewSession(src,
+		tln.WithToolResolver(&tlnCaller{host: host}),
+		tln.WithFactStore(store),
+		tln.WithFilename("eval:"+req.ID))
 	if err != nil {
 		// Invalid source (should have been caught by `check` at authoring time).
-		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: %v", err)}
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("tln-plugin: %v", err)}
 	}
 	defer s.Close()
 
-	slog.Info("talon-plugin: evaluate", "call_id", req.ID, "facts", len(facts), "source_len", len(src))
+	slog.Info("tln-plugin: evaluate", "call_id", req.ID, "facts", len(facts), "source_len", len(src))
 
 	firings, err := s.Assert(ctx, facts)
 	if err != nil {
-		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: assert: %v", err)}
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("tln-plugin: assert: %v", err)}
 	}
 
 	out := evalResponse{OK: true, Firings: make([]evalFiring, 0, len(firings)), Snapshot: s.Snapshot()}
@@ -342,7 +342,7 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 
 	structured, err := json.Marshal(out)
 	if err != nil {
-		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("talon-plugin: encode result: %v", err)}
+		return plugin.Response{CallID: req.ID, Error: fmt.Sprintf("tln-plugin: encode result: %v", err)}
 	}
 	return plugin.Response{
 		CallID:            req.ID,
@@ -351,37 +351,37 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 	}
 }
 
-// runTalon picks the right SDK entry point based on whether a Datalevin
-// backend is configured. With one, talon.Run handles the full language
+// runTln picks the right SDK entry point based on whether a Datalevin
+// backend is configured. With one, tln.Run handles the full language
 // (workflows + detect + queries + ML primitives). Without one we fall
-// back to talon.RunWorkflow which is faster but rejects detect-bearing
-// programs with talon.ErrRequiresFactStore — the LLM gets a clear error
+// back to tln.RunWorkflow which is faster but rejects detect-bearing
+// programs with tln.ErrRequiresFactStore — the LLM gets a clear error
 // pointing at the missing config rather than a panic.
-func (h *handler) runTalon(ctx context.Context, src, callID string, host plugin.HostCaller) (*talon.Result, error) {
-	opts := []talon.Option{
-		talon.WithMCP(&talonCaller{host: host}),
-		talon.WithFilename("workflow:" + callID),
+func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.HostCaller) (*tln.Result, error) {
+	opts := []tln.Option{
+		tln.WithToolResolver(&tlnCaller{host: host}),
+		tln.WithFilename("workflow:" + callID),
 	}
 	if h.cfg.DatalevinURL != "" {
-		opts = append(opts, talon.WithDatalevinURL(h.cfg.DatalevinURL))
-		return talon.Run(ctx, src, opts...)
+		opts = append(opts, tln.WithDatalevinURL(h.cfg.DatalevinURL))
+		return tln.Run(ctx, src, opts...)
 	}
-	return talon.RunWorkflow(ctx, src, opts...)
+	return tln.RunWorkflow(ctx, src, opts...)
 }
 
-// talonCaller bridges talon-language's MCPCaller interface (args
+// tlnCaller bridges tln-language's ToolResolver interface (args
 // map[string]any → any) to the host SDK's HostCaller (args
 // map[string]string → CallResult). Each side carries the data the
 // other doesn't natively understand, so we JSON-encode the args on
 // the way out and parse the reply on the way back.
-type talonCaller struct {
+type tlnCaller struct {
 	host plugin.HostCaller
 }
 
-func (c *talonCaller) Call(ctx context.Context, server, tool string, args map[string]any) (any, error) {
+func (c *tlnCaller) Call(ctx context.Context, server, tool string, args map[string]any) (any, error) {
 	// Args cross the gRPC boundary as map[string]string per the
 	// existing tool-call contract. The host re-parses them when
-	// delivering to the target plugin; for talon arguments that are
+	// delivering to the target plugin; for tln arguments that are
 	// non-strings (numbers, bools, nested maps) we JSON-encode the
 	// whole arg value so the receiver can decode back if needed.
 	encoded := make(map[string]string, len(args))
@@ -425,7 +425,7 @@ func (c *talonCaller) Call(ctx context.Context, server, tool string, args map[st
 // (Content) and a JSON payload (StructuredContent) carrying the
 // per-step trace. The summary is what the LLM sees; the structured
 // blob is for clients that want the raw step-by-step view.
-func formatResult(r *talon.Result) (string, string) {
+func formatResult(r *tln.Result) (string, string) {
 	type stepEntry struct {
 		Type   string `json:"type"`
 		Name   string `json:"name"`

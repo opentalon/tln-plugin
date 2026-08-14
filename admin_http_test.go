@@ -101,7 +101,7 @@ workflow "test" {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST: status %d, body %s", resp.StatusCode, b)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "fleet.talon")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "fleet.tln")); err != nil {
 		t.Errorf("file not written: %v", err)
 	}
 
@@ -139,12 +139,12 @@ workflow "test" {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE: status %d, want 204", resp.StatusCode)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "fleet.talon")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "fleet.tln")); !os.IsNotExist(err) {
 		t.Errorf("file still present after delete: %v", err)
 	}
 }
 
-func TestAdmin_RejectsInvalidTalon(t *testing.T) {
+func TestAdmin_RejectsInvalidTln(t *testing.T) {
 	srv, _ := newTestServer(t, "tok")
 	body, _ := json.Marshal(map[string]string{"name": "broken", "source": "workflow \"x\" { step \"s\" {"})
 	resp := do(t, http.MethodPost, srv.URL+"/rules", "tok", bytes.NewReader(body))
@@ -156,7 +156,7 @@ func TestAdmin_RejectsInvalidTalon(t *testing.T) {
 }
 
 func TestAdmin_AcceptsDetectRule(t *testing.T) {
-	// Detect-bearing rules are valid Talon — the SDK returns
+	// Detect-bearing rules are valid Tln — the SDK returns
 	// ErrRequiresFactStore as the "this is a detect rule, not a
 	// workflow" signal during dry-compile. The store must accept it.
 	srv, _ := newTestServer(t, "tok")

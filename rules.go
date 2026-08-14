@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/opentalon/talon-language/pkg/talon"
+	"github.com/opentalon/tln-language/pkg/tln"
 )
 
-// ruleStore is a filesystem-backed store: one rule = one `<name>.talon`
+// ruleStore is a filesystem-backed store: one rule = one `<name>.tln`
 // file in RootDir. Rule names are validated against ruleNamePattern so
 // they can't escape RootDir via "../" or land on awkward filenames.
 type ruleStore struct {
@@ -38,14 +38,14 @@ func (s *ruleStore) pathFor(name string) (string, error) {
 	if !ruleNamePattern.MatchString(name) {
 		return "", errInvalidRuleName
 	}
-	return filepath.Join(s.RootDir, name+".talon"), nil
+	return filepath.Join(s.RootDir, name+".tln"), nil
 }
 
-// Save writes (creates or overwrites) the rule. Talon source is
+// Save writes (creates or overwrites) the rule. Tln source is
 // validated via the SDK before the file lands on disk — a syntactically
 // invalid rule never gets stored. Detect-bearing rules are accepted
 // (ErrRequiresFactStore from RunWorkflow is the SDK's "this is a
-// detect rule, not a workflow" signal; both are valid Talon programs).
+// detect rule, not a workflow" signal; both are valid Tln programs).
 func (s *ruleStore) Save(name, src string) error {
 	path, err := s.pathFor(name)
 	if err != nil {
@@ -63,7 +63,7 @@ func (s *ruleStore) Save(name, src string) error {
 	return nil
 }
 
-// Read returns the Talon source for the named rule.
+// Read returns the Tln source for the named rule.
 func (s *ruleStore) Read(name string) (string, error) {
 	path, err := s.pathFor(name)
 	if err != nil {
@@ -112,25 +112,25 @@ func (s *ruleStore) List() ([]string, error) {
 			continue
 		}
 		n := e.Name()
-		if !strings.HasSuffix(n, ".talon") {
+		if !strings.HasSuffix(n, ".tln") {
 			continue
 		}
-		names = append(names, strings.TrimSuffix(n, ".talon"))
+		names = append(names, strings.TrimSuffix(n, ".tln"))
 	}
 	sort.Strings(names)
 	return names, nil
 }
 
-// validateRuleSource confirms src is parseable Talon. Uses RunWorkflow
+// validateRuleSource confirms src is parseable Tln. Uses RunWorkflow
 // as a dry compile — for detect-bearing rules the SDK returns
-// ErrRequiresFactStore after parse+plan, which means "valid Talon, just
+// ErrRequiresFactStore after parse+plan, which means "valid Tln, just
 // not a workflow"; we accept that. Compile errors propagate.
 func validateRuleSource(src string) error {
-	_, err := talon.RunWorkflow(context.Background(), src)
+	_, err := tln.RunWorkflow(context.Background(), src)
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, talon.ErrRequiresFactStore) {
+	if errors.Is(err, tln.ErrRequiresFactStore) {
 		return nil
 	}
 	return err

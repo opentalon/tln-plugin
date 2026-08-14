@@ -10,16 +10,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/opentalon/talon-language/pkg/talon"
+	"github.com/opentalon/tln-language/pkg/tln"
 )
 
-// adminServer hosts the talon-plugin's management HTTP API — rule CRUD
+// adminServer hosts the tln-plugin's management HTTP API — rule CRUD
 // only. Mounted by the opentalon host at the reverse-proxy path
 // /{config-map-key}/*. Every request must carry
 // `Authorization: Bearer <token>`; the token comes from the
 // plugin's `admin_token` config field.
 //
-// talon-plugin is a gateway for executing the Talon language, not a
+// tln-plugin is a gateway for executing the Tln language, not a
 // data store, so it deliberately exposes no fact-seeding API.
 //
 // Auth model: a shared bearer secret only. The opentalon host's
@@ -74,7 +74,7 @@ func (a *adminServer) authMiddleware(next http.Handler) http.Handler {
 }
 
 // handleRules covers /rules (no trailing name): GET lists, POST
-// creates. The body for POST is the Talon source as a string
+// creates. The body for POST is the Tln source as a string
 // alongside the rule's name; storing the metadata side-by-side
 // in JSON keeps the API self-describing.
 func (a *adminServer) handleRules(w http.ResponseWriter, r *http.Request) {
@@ -174,8 +174,8 @@ func (a *adminServer) writeRuleError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err)
 	default:
 		// Compile errors from validateRuleSource are 400 (the request
-		// is bad: invalid Talon source). Everything else is 500.
-		if _, ok := err.(*talon.CompileError); ok {
+		// is bad: invalid Tln source). Everything else is 500.
+		if _, ok := err.(*tln.CompileError); ok {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
