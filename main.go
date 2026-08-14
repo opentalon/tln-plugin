@@ -9,7 +9,7 @@ import (
 
 func main() {
 	if err := plugin.Serve(&handler{}); err != nil {
-		slog.Error("talon-plugin: serve", "error", err)
+		slog.Error("tln-plugin: serve", "error", err)
 		os.Exit(1)
 	}
 }

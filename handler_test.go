@@ -86,7 +86,7 @@ detect "Low stock" {
 func TestCapabilities(t *testing.T) {
 	h := &handler{}
 	caps := h.Capabilities()
-	if caps.Name != "talon-plugin" {
+	if caps.Name != "tln-plugin" {
 		t.Errorf("name: %q", caps.Name)
 	}
 	if !caps.SupportsCallbacks {
@@ -207,8 +207,8 @@ workflow "chain" {
 	if len(host.calls) != 2 {
 		t.Fatalf("expected 2 host calls, got %d", len(host.calls))
 	}
-	// The second step's person_id is "42" (encoded — talon resolved
-	// step("create").result.id and the talonCaller JSON-encoded the
+	// The second step's person_id is "42" (encoded — tln resolved
+	// step("create").result.id and the tlnCaller JSON-encoded the
 	// non-string value before crossing the host's string-map boundary).
 	if host.calls[1].Args["person_id"] != "42" {
 		t.Errorf("person_id: %q (full args: %+v)", host.calls[1].Args["person_id"], host.calls[1].Args)
@@ -235,7 +235,7 @@ workflow "err" {
 		host,
 	)
 	if resp.Error == "" {
-		t.Fatal("expected error from MCP failure surfacing through talon runtime")
+		t.Fatal("expected error from MCP failure surfacing through tln runtime")
 	}
 	if !strings.Contains(resp.Error, "permission denied") {
 		t.Errorf("error should include host detail: %q", resp.Error)

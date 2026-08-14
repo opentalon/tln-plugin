@@ -1,0 +1,123 @@
+Tln is a small, deterministic language for automating MCP tool calls. You author Tln source; the runtime executes it exactly as written (no model in the loop at run time). A program is made of two kinds of blocks:
+
+- `workflow "..." { ... }` — an imperative, multi-step MCP chain (do this, then that).
+- `on ... { ... }` — a reactive rule that fires when a fact changes, and runs a workflow (or emits a recommendation/detection) as a side effect.
+
+Use a `workflow` when you need to batch operations, chain MCP calls whose later steps depend on earlier results, or auto-paginate a list. Use an `on`-block when you want something to happen *in response to data changing* (e.g. a value crossing a threshold).
+
+========================================
+WORKFLOWS
+========================================
+
+Syntax:
+
+```
+workflow "short description" {
+  step "step_name" {
+    mcp "<server>" "<tool>" {
+      <arg_name> <value>
+      <arg_name> <expression>
+    }
+  }
+
+  step "next_step" depends_on "step_name" {
+    mcp "<server>" "<tool>" {
+      <arg_name> step("step_name").result.<field>
+    }
+  }
+}
+```
+
+Example — delete all items whose name contains "Test":
+
+```
+workflow "Delete all Test items" {
+  step "find" {
+    mcp "inventory" "list-items" {
+      query "name:*Test*"
+      collect_all true
+    }
+  }
+  step "delete" depends_on "find" {
+    mcp "inventory" "batch-delete" {
+      ids step("find").result.items.map(id)
+    }
+  }
+}
+```
+
+Expressions available inside a step's args:
+- `step("name").result.field` — a previous step's result (dot-path into the returned JSON).
+- `.map(field)` — extract one field from a list, e.g. `result.items.map(id)` → `[1,2,3]`.
+- `context.<name>` — a value from the conversation/request context.
+- string / number / bool literals.
+
+Notes:
+- `collect_all true` auto-paginates by re-calling the same MCP tool with `page` incremented until `has_more` is false.
+- Step names must be unique within a workflow; ordering is by `depends_on`.
+- There is NO conditional/guard on a step — a workflow is an unconditional DAG. To act only when a condition holds, use an `on`-block (below), whose `when` clause is the condition.
+
+========================================
+FACTS
+========================================
+
+A fact is an entity-attribute-value triple: *(entity, attribute, value)* — e.g. *(item 42, `current_stock`, 8)*. Facts are how reactive rules observe the world: some producer asserts facts (a poll result, a webhook, another process), and `on`-blocks react to *changes* in them.
+
+- `entity` — the id of the thing the fact is about (e.g. an item id).
+- `attribute` — the named property, e.g. `current_stock`.
+- `value` — the current value (number, string, or bool).
+
+Re-asserting an unchanged value is a no-op (fires nothing). A value that *changes* emits a change event that `on change` blocks can match.
+
+========================================
+REACTIVE on-BLOCKS
+========================================
+
+Syntax:
+
+```
+on change attr "<attribute>" {          # also: on assert <name> | on retract <name>
+  when <condition>                       # optional guard
+  workflow "<Workflow name>"             # action: run a workflow…
+}
+```
+
+Triggers:
+- `on change attr "current_stock"` — fires when that attribute's value changes on any entity.
+- `on change attr "current_stock" to 0` — fires only when it changes *to* a specific value.
+- `on assert <name>` / `on retract <name>` — fires when a fact is added / removed.
+
+Actions in the body (one or more):
+- `workflow "Name"` — run the named workflow (its MCP steps execute as a side effect).
+- `recommend "..."` / `detect "..."` — emit a recommendation / detection.
+- `logger.warn "..."` / `logger.info "..."` — log (supports `{event.entity}` interpolation).
+
+The `when` clause (guard) — restricted for safety:
+- Compare the event fields `new_value`, `prev_value`, or `entity` against **literals**.
+- Operators: `==` `!=` `<` `<=` `>` `>=`; combine with `and` / `or`.
+- You may NOT reference other facts, context, or step results in `when` — thresholds must be literals. (`when new_value <= attr "minimum"` is rejected at compile time.)
+
+Fire-once-on-crossing idiom — fire only as a value drops *through* a threshold, not every time it's already low:
+
+```
+on change attr "current_stock" {
+  when prev_value >= 10 and new_value < 10
+  workflow "Refill stock"
+}
+
+workflow "Refill stock" {
+  step "ticket" {
+    mcp "tickets" "create" {
+      item  step("trigger").result.entity
+      qty   50
+    }
+  }
+}
+```
+
+Inside a workflow fired by an on-block, a `trigger` pseudo-step carries the event:
+- `step("trigger").result.entity` — the entity whose fact changed.
+- `step("trigger").result.value` — the new value.
+- `step("trigger").result.prev` — the previous value.
+- `step("trigger").result.attr` — the attribute name.
+- `step("trigger").result.kind` — `change` | `assert` | `retract`.
