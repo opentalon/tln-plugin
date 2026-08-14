@@ -53,7 +53,7 @@ type handler struct {
 
 // Configure parses the host-supplied config block. Empty configJSON is
 // valid — the plugin runs in workflow-only mode. Side effect: starts
-// the admin HTTP server in a goroutine when both OPENTLN_HTTP_PORT
+// the admin HTTP server in a goroutine when both OPENTALON_HTTP_PORT
 // (set by the host's plugin loader) and admin_token (from this config)
 // are present. The server outlives Configure; it shuts down when the
 // process exits alongside the gRPC server.
@@ -69,18 +69,18 @@ func (h *handler) Configure(configJSON string) error {
 		slog.Info("tln-plugin: workflow-only mode (no datalevin_url configured)")
 	}
 
-	port := os.Getenv("OPENTLN_HTTP_PORT")
+	port := os.Getenv("OPENTALON_HTTP_PORT")
 	switch {
 	case port == "" && h.cfg.AdminToken != "":
 		// Operator gave us a token but no HTTP grant from the host —
 		// the API is unreachable. Loud warning so the misconfiguration
 		// is obvious, but don't error (gRPC still works).
-		slog.Warn("tln-plugin: admin_token set but OPENTLN_HTTP_PORT not granted; admin API disabled")
+		slog.Warn("tln-plugin: admin_token set but OPENTALON_HTTP_PORT not granted; admin API disabled")
 	case port != "" && h.cfg.AdminToken == "":
 		// Inverse: host granted HTTP but no token. We refuse to serve
 		// an auth-less API on principle — there's no audience for
 		// uncredentialed mutation of rules.
-		slog.Warn("tln-plugin: OPENTLN_HTTP_PORT granted but no admin_token in config; admin API refused (set admin_token to enable)")
+		slog.Warn("tln-plugin: OPENTALON_HTTP_PORT granted but no admin_token in config; admin API refused (set admin_token to enable)")
 	case port != "" && h.cfg.AdminToken != "":
 		if err := h.startAdminServer(port); err != nil {
 			return fmt.Errorf("tln-plugin: admin server: %w", err)
