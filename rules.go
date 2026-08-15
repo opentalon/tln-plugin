@@ -126,6 +126,9 @@ func (s *ruleStore) List() ([]string, error) {
 // ErrRequiresFactStore after parse+plan, which means "valid Tln, just
 // not a workflow"; we accept that. Compile errors propagate.
 func validateRuleSource(src string) error {
+	if err := guardUnsafeSource(src); err != nil {
+		return err
+	}
 	_, err := tln.RunWorkflow(context.Background(), src)
 	if err == nil {
 		return nil

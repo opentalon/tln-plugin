@@ -224,6 +224,9 @@ func (h *handler) execCheck(req plugin.Request) plugin.Response {
 	if src == "" {
 		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass Tln source as a string"}
 	}
+	if err := guardUnsafeSource(src); err != nil {
+		return plugin.Response{CallID: req.ID, Error: err.Error()}
+	}
 
 	err := tln.Check(src, tln.WithFilename("check:"+req.ID))
 	if err == nil {
@@ -280,6 +283,9 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 	src := req.Args["source"]
 	if src == "" {
 		return plugin.Response{CallID: req.ID, Error: "source argument is required; pass Tln source as a string"}
+	}
+	if err := guardUnsafeSource(src); err != nil {
+		return plugin.Response{CallID: req.ID, Error: err.Error()}
 	}
 
 	var factsIn []evalFact
@@ -358,6 +364,9 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 // programs with tln.ErrRequiresFactStore — the LLM gets a clear error
 // pointing at the missing config rather than a panic.
 func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.HostCaller) (*tln.Result, error) {
+	if err := guardUnsafeSource(src); err != nil {
+		return nil, err
+	}
 	opts := []tln.Option{
 		tln.WithToolResolver(&tlnCaller{host: host}),
 		tln.WithFilename("workflow:" + callID),
