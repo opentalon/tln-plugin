@@ -93,12 +93,12 @@ func (h *handler) Configure(configJSON string) error {
 // It hosts the rule CRUD API only — tln-plugin is a language gateway,
 // not a data store, so it does not expose a fact-seeding API.
 func (h *handler) startAdminServer(port string) error {
-	if h.cfg.RulesDir == "" {
-		return fmt.Errorf("rules_dir is required when admin_token is set")
-	}
-	admin := &adminServer{
-		token: h.cfg.AdminToken,
-		rules: &ruleStore{RootDir: h.cfg.RulesDir},
+	// rules_dir is optional: the /check validator is a pure function of the
+	// posted source and needs no store. When rules_dir is unset the /rules
+	// CRUD endpoints return 503 (a.rules == nil) but /check still serves.
+	admin := &adminServer{token: h.cfg.AdminToken}
+	if h.cfg.RulesDir != "" {
+		admin.rules = &ruleStore{RootDir: h.cfg.RulesDir}
 	}
 	srv := &http.Server{
 		Addr:              "127.0.0.1:" + port,
@@ -372,8 +372,12 @@ func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.Ho
 		tln.WithFilename("workflow:" + callID),
 	}
 	if h.cfg.DatalevinURL != "" {
-		opts = append(opts, tln.WithDatalevinURL(h.cfg.DatalevinURL))
-		return tln.Run(ctx, src, opts...)
+		// tln-language v0.13 dropped the built-in datalevin-URL fact store
+		// (WithDatalevinURL); a Datalevin-backed store is now supplied as an
+		// external store plugin via WithFactStore. Fail loudly rather than
+		// silently running detect rules against no store.
+		return nil, fmt.Errorf("datalevin_url is set but not supported by this build "+
+			"(tln-language v0.13 requires a datalevin store plugin via WithFactStore): %s", h.cfg.DatalevinURL)
 	}
 	return tln.RunWorkflow(ctx, src, opts...)
 }
