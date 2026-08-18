@@ -14,14 +14,14 @@ Syntax:
 ```
 workflow "short description" {
   step "step_name" {
-    mcp "<server>" "<tool>" {
+    tool "<server>" "<tool>" {
       <arg_name> <value>
       <arg_name> <expression>
     }
   }
 
   step "next_step" depends_on "step_name" {
-    mcp "<server>" "<tool>" {
+    tool "<server>" "<tool>" {
       <arg_name> step("step_name").result.<field>
     }
   }
@@ -33,13 +33,13 @@ Example — delete all items whose name contains "Test":
 ```
 workflow "Delete all Test items" {
   step "find" {
-    mcp "inventory" "list-items" {
+    tool "inventory" "list-items" {
       query "name:*Test*"
       collect_all true
     }
   }
   step "delete" depends_on "find" {
-    mcp "inventory" "batch-delete" {
+    tool "inventory" "batch-delete" {
       ids step("find").result.items.map(id)
     }
   }
@@ -107,7 +107,7 @@ on change attr "current_stock" {
 
 workflow "Refill stock" {
   step "ticket" {
-    mcp "tickets" "create" {
+    tool "tickets" "create" {
       item  step("trigger").result.entity
       qty   50
     }
