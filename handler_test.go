@@ -108,7 +108,7 @@ func TestExecuteCheck(t *testing.T) {
 	h := &handler{}
 
 	// Valid source → ok, no error, structured {"ok":true}.
-	valid := `workflow "ok" { step "s" { mcp "srv" "tool" { x "1" } } }`
+	valid := `workflow "ok" { step "s" { tool "srv" "tool" { x "1" } } }`
 	resp := h.ExecuteWithCallbacks(context.Background(), plugin.Request{ID: "c1", Action: "check", Args: map[string]string{"workflow": valid}}, nil)
 	if resp.Error != "" {
 		t.Fatalf("valid source should not error: %q", resp.Error)
@@ -140,7 +140,7 @@ func TestExecuteWithCallbacks_RunsWorkflowAndForwardsMCPCalls(t *testing.T) {
 	src := `
 workflow "test" {
   step "create" {
-    mcp "hr" "create-person" {
+    tool "hr" "create-person" {
       name "Alice"
     }
   }
@@ -177,12 +177,12 @@ func TestExecuteWithCallbacks_StepResultChaining(t *testing.T) {
 	src := `
 workflow "chain" {
   step "create" {
-    mcp "hr" "create-person" {
+    tool "hr" "create-person" {
       name "Alice"
     }
   }
   step "assign" depends_on "create" {
-    mcp "inv" "assign-item" {
+    tool "inv" "assign-item" {
       person_id step("create").result.id
     }
   }
@@ -219,7 +219,7 @@ func TestExecuteWithCallbacks_HostError(t *testing.T) {
 	src := `
 workflow "err" {
   step "s1" {
-    mcp "srv" "tool" {
+    tool "srv" "tool" {
       x 1
     }
   }

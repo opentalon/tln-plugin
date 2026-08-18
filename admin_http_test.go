@@ -87,7 +87,7 @@ func TestAdmin_RuleCRUD(t *testing.T) {
 	src := `
 workflow "test" {
   step "s1" {
-    mcp "srv" "tool" {
+    tool "srv" "tool" {
       x 1
     }
   }

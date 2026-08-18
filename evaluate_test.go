@@ -17,7 +17,7 @@ on change attr "current_stock" {
 }
 workflow "Refill stock" {
   step "ticket" {
-    mcp "inventory" "create-ticket" {
+    tool "inventory" "create-ticket" {
       item     step("trigger").result.entity
       quantity 50
     }

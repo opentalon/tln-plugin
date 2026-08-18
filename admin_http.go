@@ -40,6 +40,7 @@ func (a *adminServer) routes() http.Handler {
 
 	mux.HandleFunc("/rules", a.handleRules)
 	mux.HandleFunc("/rules/", a.handleRule)
+	mux.HandleFunc("/check", a.handleCheck)
 
 	return a.authMiddleware(mux)
 }
@@ -112,6 +113,45 @@ func (a *adminServer) handleRules(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleCheck covers POST /check: validate Tln source WITHOUT storing or
+// running it. Pure compile (lex → parse → resolve → validate → plan) via
+// validateRuleSource — no MCP calls, no HostCaller, no side effects — so a
+// host app (Timly) can deterministically verify machine-authored Tln before
+// storing it, with no LLM in the loop and no need for the bidi host stream.
+// Returns 200 {"ok":true} for valid source, or 200 {"ok":false,
+// "diagnostics":"<compiler diagnostics>"} for invalid source. Needs no
+// rules_dir — it is a pure function of the posted source.
+func (a *adminServer) handleCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Accept `source` (matches /rules) or `tln_source` (matches the agents
+	// plugin's validate action arg) so either caller shape works.
+	var body struct {
+		Source    string `json:"source"`
+		TlnSource string `json:"tln_source"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode body: %w", err))
+		return
+	}
+	src := body.Source
+	if src == "" {
+		src = body.TlnSource
+	}
+	if src == "" {
+		writeError(w, http.StatusBadRequest, errors.New("source (or tln_source) is required"))
+		return
+	}
+	if err := validateRuleSource(src); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "diagnostics": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "diagnostics": ""})
 }
 
 // handleRule covers /rules/{name}: GET fetches, PUT replaces, DELETE
