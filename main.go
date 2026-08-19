@@ -1,8 +1,9 @@
-// Command tln-plugin is the plain, no-extensions build of the tln plugin: it
-// serves the Tln runtime with no bundle plugins. To ship extra plugins (a
-// solver, extra connectors, …) an EXTERNAL bundle imports package runtime and
-// calls runtime.Serve(plugins...) with the plugins its own mod.tln declares —
-// this repo never depends on any specific plugin.
+// Command tln-plugin serves the Tln runtime. It compiles in whatever plugins
+// bundledPlugins() returns — generated from a mod.tln by `cmd/bundle` at build
+// time (see the Makefile). With no mod.tln the generated default returns none,
+// so a plain `go build` yields the no-extensions binary. This repo declares no
+// plugin itself; the list is supplied externally (e.g. Core writes mod.tln into
+// the clone from config.yaml's `bundle:`).
 package main
 
 import (
@@ -13,7 +14,7 @@ import (
 )
 
 func main() {
-	if err := runtime.Serve(); err != nil {
+	if err := runtime.Serve(bundledPlugins()...); err != nil {
 		slog.Error("tln-plugin: serve", "error", err)
 		os.Exit(1)
 	}

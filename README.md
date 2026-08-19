@@ -128,6 +128,53 @@ go build -o tln-plugin .
 
 For production deployments, prefer `github:` auto-fetch (see Config above) — the host clones, builds, and pins the binary via `plugins.lock`, so operators don't manage release artifacts manually.
 
+## Plugins (bundle-install)
+
+tln plugins (a solver like [`tln-asp`](https://github.com/opentalon/tln-asp), extra connectors, a store) are **in-process Go, no gRPC** — they compile *into* this binary. tln-plugin declares **none of them**: the list is supplied externally as a `mod.tln`, and `make build` composes it in via `cmd/bundle`. No `mod.tln` → plain no-extensions build.
+
+**`mod.tln`** (never committed here — the host writes it):
+
+```
+# plugin "<name>" ["<ref>"] [store] from "<module>"
+plugin "asp" "master" from "github.com/opentalon/tln-asp"
+```
+
+```
+make build            # composes the plugins in mod.tln, then go build
+make build            # (no mod.tln) → plain build
+```
+
+`cmd/bundle` regenerates `bundle_gen.go` and `go get`s each `module@ref`; `main` runs `runtime.Serve(bundledPlugins()...)`. A workflow then uses it, e.g. the asp solver:
+
+```tln
+connector "solver" via asp { }
+
+workflow "stable models" {
+  step "solve" {
+    tool "solver" "solve" { program "p :- not q.  q :- not p." }
+  }
+}
+```
+
+**In OpenTalon config** — the host clones this repo, writes `mod.tln` from `bundle:`, and runs `make build`:
+
+```yaml
+plugins:
+  tln-plugin:
+    github: opentalon/tln-plugin
+    ref: master
+    bundle:                              # tln plugins to compile in
+      - name: asp
+        github: opentalon/tln-asp
+        ref: master
+      # - name: db
+      #   github: opentalon/tln-db
+      #   ref: master
+      #   store: true
+```
+
+Install a plugin in any environment = **one entry in that env's `config.yaml`**; `ref` pins the version. Nothing in `tln-plugin`, the plugin repo, or core changes. (Requires `make` in the host image.)
+
 ## Scope today
 
 - **Workflow blocks**: ad-hoc LLM-authored Tln workflows (`workflow "..." { step "..." { mcp ... } }`) run via `tln.RunWorkflow`. No backend dependency.
