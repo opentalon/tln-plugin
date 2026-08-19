@@ -1,4 +1,4 @@
-package main
+package runtime
 
 import (
 	"strings"
@@ -33,7 +33,7 @@ func TestGuardUnsafeSource_Rejects(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := guardUnsafeSource(c.src)
+			err := guardUnsafeSource(c.src, nil)
 			if err == nil {
 				t.Fatalf("expected rejection, got nil")
 			}
@@ -54,7 +54,7 @@ func TestGuardUnsafeSource_AllowsHostMediatedTools(t *testing.T) {
 		`detect "e" { for records where attr "environment" == "prod" flag matching items }`,
 	}
 	for _, src := range ok {
-		if err := guardUnsafeSource(src); err != nil {
+		if err := guardUnsafeSource(src, nil); err != nil {
 			t.Errorf("benign source rejected: %v\nsrc: %s", err, src)
 		}
 	}

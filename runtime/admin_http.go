@@ -1,4 +1,4 @@
-package main
+package runtime
 
 import (
 	"crypto/subtle"
@@ -30,6 +30,9 @@ import (
 type adminServer struct {
 	token string
 	rules *ruleStore
+	// connectors is the set of bundle-plugin names /check allows a workflow to
+	// reference via `connector "…" via <name>`.
+	connectors map[string]bool
 }
 
 // routes returns the configured http.Handler. Kept as a method so
@@ -147,7 +150,7 @@ func (a *adminServer) handleCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("source (or tln_source) is required"))
 		return
 	}
-	if err := validateRuleSource(src); err != nil {
+	if err := validateRuleSource(src, a.connectors); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "diagnostics": err.Error()})
 		return
 	}
