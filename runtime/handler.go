@@ -234,12 +234,17 @@ func (h *handler) execCheck(req plugin.Request) plugin.Response {
 		return plugin.Response{CallID: req.ID, Error: err.Error()}
 	}
 
-	err := tln.Check(src, tln.WithFilename("check:"+req.ID))
+	// HasReactiveRules both validates (same pipeline as Check) and reports
+	// whether the program has on/detect blocks, so callers (opentalon-agents)
+	// can route a domain event: reactive → evaluate against facts, workflow-only
+	// → run imperatively.
+	reactive, err := tln.HasReactiveRules(src, tln.WithFilename("check:"+req.ID))
 	if err == nil {
+		structured, _ := json.Marshal(map[string]any{"ok": true, "reactive": reactive})
 		return plugin.Response{
 			CallID:            req.ID,
 			Content:           "ok: source is valid Tln.",
-			StructuredContent: `{"ok":true}`,
+			StructuredContent: string(structured),
 		}
 	}
 
