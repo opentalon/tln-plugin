@@ -1,4 +1,4 @@
-package main
+package runtime
 
 import (
 	"context"
@@ -18,6 +18,9 @@ import (
 // they can't escape RootDir via "../" or land on awkward filenames.
 type ruleStore struct {
 	RootDir string
+	// connectors is the set of bundle-plugin names a stored rule may reference
+	// via `connector "…" via <name>`; passed to the source guard on Save.
+	connectors map[string]bool
 }
 
 // ruleNamePattern allows only safe filesystem-friendly characters and
@@ -51,7 +54,7 @@ func (s *ruleStore) Save(name, src string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateRuleSource(src); err != nil {
+	if err := validateRuleSource(src, s.connectors); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(s.RootDir, 0o755); err != nil {
@@ -125,8 +128,8 @@ func (s *ruleStore) List() ([]string, error) {
 // as a dry compile — for detect-bearing rules the SDK returns
 // ErrRequiresFactStore after parse+plan, which means "valid Tln, just
 // not a workflow"; we accept that. Compile errors propagate.
-func validateRuleSource(src string) error {
-	if err := guardUnsafeSource(src); err != nil {
+func validateRuleSource(src string, allowedConnectors map[string]bool) error {
+	if err := guardUnsafeSource(src, allowedConnectors); err != nil {
 		return err
 	}
 	_, err := tln.RunWorkflow(context.Background(), src)

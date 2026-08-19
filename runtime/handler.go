@@ -1,4 +1,4 @@
-package main
+package runtime
 
 import (
 	"context"
@@ -49,6 +49,12 @@ type config struct {
 // expert system (executeCall → policy → observability → credentials).
 type handler struct {
 	cfg config
+	// pluginOpts are the bundle plugin registrations (tln.WithPlugin) an
+	// external bundle passed to Serve; runTln appends them to every program's
+	// options. connectorNames is the matching set of names the guard allows in
+	// `connector "…" via <name>`. Both empty for the plain build.
+	pluginOpts     []tln.Option
+	connectorNames map[string]bool
 }
 
 // Configure parses the host-supplied config block. Empty configJSON is
@@ -96,9 +102,9 @@ func (h *handler) startAdminServer(port string) error {
 	// rules_dir is optional: the /check validator is a pure function of the
 	// posted source and needs no store. When rules_dir is unset the /rules
 	// CRUD endpoints return 503 (a.rules == nil) but /check still serves.
-	admin := &adminServer{token: h.cfg.AdminToken}
+	admin := &adminServer{token: h.cfg.AdminToken, connectors: h.connectorNames}
 	if h.cfg.RulesDir != "" {
-		admin.rules = &ruleStore{RootDir: h.cfg.RulesDir}
+		admin.rules = &ruleStore{RootDir: h.cfg.RulesDir, connectors: h.connectorNames}
 	}
 	srv := &http.Server{
 		Addr:              "127.0.0.1:" + port,
@@ -224,7 +230,7 @@ func (h *handler) execCheck(req plugin.Request) plugin.Response {
 	if src == "" {
 		return plugin.Response{CallID: req.ID, Error: "workflow argument is required; pass Tln source as a string"}
 	}
-	if err := guardUnsafeSource(src); err != nil {
+	if err := guardUnsafeSource(src, h.connectorNames); err != nil {
 		return plugin.Response{CallID: req.ID, Error: err.Error()}
 	}
 
@@ -284,7 +290,7 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 	if src == "" {
 		return plugin.Response{CallID: req.ID, Error: "source argument is required; pass Tln source as a string"}
 	}
-	if err := guardUnsafeSource(src); err != nil {
+	if err := guardUnsafeSource(src, h.connectorNames); err != nil {
 		return plugin.Response{CallID: req.ID, Error: err.Error()}
 	}
 
@@ -364,13 +370,16 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 // programs with tln.ErrRequiresFactStore — the LLM gets a clear error
 // pointing at the missing config rather than a panic.
 func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.HostCaller) (*tln.Result, error) {
-	if err := guardUnsafeSource(src); err != nil {
+	if err := guardUnsafeSource(src, h.connectorNames); err != nil {
 		return nil, err
 	}
 	opts := []tln.Option{
 		tln.WithToolResolver(&tlnCaller{host: host}),
 		tln.WithFilename("workflow:" + callID),
 	}
+	// Bundle plugins wired in by Serve (e.g. the asp solver). Empty for the
+	// plain build. Declared in an external bundle's mod.tln, never here.
+	opts = append(opts, h.pluginOpts...)
 	if h.cfg.DatalevinURL != "" {
 		// tln-language v0.13 dropped the built-in datalevin-URL fact store
 		// (WithDatalevinURL); a Datalevin-backed store is now supplied as an
