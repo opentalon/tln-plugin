@@ -39,3 +39,27 @@ jobs:
 
       - name: Run tests
         run: go test -race -count=1 -v ./...
+
+  # Verify the bundle-install end to end: declare the asp plugin in a mod.tln
+  # (as OpenTalon Core would from config.yaml's `bundle:`), run `make build`,
+  # and assert asp was fetched from GitHub and composed into the binary.
+  bundle-asp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install the asp plugin via bundle
+        run: |
+          printf 'plugin "asp" "latest" from "github.com/opentalon/tln-asp"\n' > mod.tln
+          make build BINARY_NAME=tln-plugin
+
+      - name: Verify asp was compiled in
+        run: |
+          test -x tln-plugin
+          grep -q 'github.com/opentalon/tln-asp' bundle_gen.go
+          echo "asp plugin composed into tln-plugin"
