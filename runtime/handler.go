@@ -205,7 +205,12 @@ func (h *handler) execWorkflow(ctx context.Context, req plugin.Request, host plu
 		"workflow_len", len(src),
 		"datalevin", h.cfg.DatalevinURL != "")
 
-	result, err := h.runTln(ctx, src, req.ID, host)
+	// Dry run: propagate the flag to every tool call so the executor (openapi-
+	// plugin) reads real data but skips writes. Reads still run; writes are
+	// short-circuited and report what they WOULD have done.
+	dryRun := req.Args["dry_run"] == "true"
+
+	result, err := h.runTln(ctx, src, req.ID, host, dryRun)
 	if err != nil {
 		return plugin.Response{
 			CallID: req.ID,
@@ -374,12 +379,12 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 // back to tln.RunWorkflow which is faster but rejects detect-bearing
 // programs with tln.ErrRequiresFactStore — the LLM gets a clear error
 // pointing at the missing config rather than a panic.
-func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.HostCaller) (*tln.Result, error) {
+func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.HostCaller, dryRun bool) (*tln.Result, error) {
 	if err := guardUnsafeSource(src, h.connectorNames); err != nil {
 		return nil, err
 	}
 	opts := []tln.Option{
-		tln.WithToolResolver(&tlnCaller{host: host}),
+		tln.WithToolResolver(&tlnCaller{host: host, dryRun: dryRun}),
 		tln.WithFilename("workflow:" + callID),
 	}
 	// Bundle plugins wired in by Serve (e.g. the asp solver). Empty for the
@@ -401,8 +406,15 @@ func (h *handler) runTln(ctx context.Context, src, callID string, host plugin.Ho
 // map[string]string → CallResult). Each side carries the data the
 // other doesn't natively understand, so we JSON-encode the args on
 // the way out and parse the reply on the way back.
+// dryRunArg is the reserved key a dry run stamps onto every downstream tool
+// call. The executor (openapi-plugin) reads it to skip writes. Core's callback
+// handler passes unknown __ot_cb_* keys through untouched, so it reaches the
+// executor. Kept in sync with openapi-plugin's constant of the same name.
+const dryRunArg = "__ot_cb_dry_run"
+
 type tlnCaller struct {
-	host plugin.HostCaller
+	host   plugin.HostCaller
+	dryRun bool
 }
 
 func (c *tlnCaller) Call(ctx context.Context, server, tool string, args map[string]any) (any, error) {
@@ -422,6 +434,11 @@ func (c *tlnCaller) Call(ctx context.Context, server, tool string, args map[stri
 			return nil, fmt.Errorf("encode arg %q: %w", k, err)
 		}
 		encoded[k] = string(b)
+	}
+	// On a dry run, tag every tool call so the executor skips writes (reads run
+	// normally). tln args never collide with this reserved key.
+	if c.dryRun {
+		encoded[dryRunArg] = "true"
 	}
 
 	res, err := c.host.RunAction(ctx, server, tool, encoded)
