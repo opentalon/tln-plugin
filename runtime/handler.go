@@ -274,11 +274,15 @@ type evalFact struct {
 }
 
 // evalFiring is one fired on-block, as returned in the `evaluate` result.
+// Result carries the fired block's per-step trace (same shape as
+// execute_workflow's StructuredContent) so a caller can see what the firing
+// actually did — the tools it ran and their outputs — not just that it fired.
 type evalFiring struct {
-	OnBlock string `json:"on_block"`
-	Ref     string `json:"ref,omitempty"`
-	RefKind string `json:"ref_kind,omitempty"`
-	Error   string `json:"error,omitempty"`
+	OnBlock string      `json:"on_block"`
+	Ref     string      `json:"ref,omitempty"`
+	RefKind string      `json:"ref_kind,omitempty"`
+	Error   string      `json:"error,omitempty"`
+	Result  *blockTrace `json:"result,omitempty"`
 }
 
 type evalResponse struct {
@@ -358,6 +362,10 @@ func (h *handler) execEvaluate(ctx context.Context, req plugin.Request, host plu
 		ef := evalFiring{OnBlock: f.OnBlock, Ref: f.Ref, RefKind: f.RefKind}
 		if f.Err != nil {
 			ef.Error = f.Err.Error()
+		}
+		if f.Result != nil {
+			blocks, _ := traceBlocks(f.Result)
+			ef.Result = &blockTrace{Blocks: blocks}
 		}
 		out.Firings = append(out.Firings, ef)
 	}
@@ -465,22 +473,32 @@ func (c *tlnCaller) Call(ctx context.Context, server, tool string, args map[stri
 	return map[string]any{"text": payload}, nil
 }
 
-// formatResult renders a workflow run as a human-readable summary
-// (Content) and a JSON payload (StructuredContent) carrying the
-// per-step trace. The summary is what the LLM sees; the structured
-// blob is for clients that want the raw step-by-step view.
-func formatResult(r *tln.Result) (string, string) {
-	type stepEntry struct {
-		Type   string `json:"type"`
-		Name   string `json:"name"`
-		Output any    `json:"output,omitempty"`
-	}
-	type blockEntry struct {
-		Steps []stepEntry `json:"steps"`
-	}
+// stepEntry / blockEntry / blockTrace are the structured per-step trace shape
+// shared by execute_workflow's StructuredContent and the evaluate firings'
+// `result`, so a client (opentalon-agents' stats) can read both the same way.
+type stepEntry struct {
+	Type   string `json:"type"`
+	Name   string `json:"name"`
+	Output any    `json:"output,omitempty"`
+}
 
+type blockEntry struct {
+	Steps []stepEntry `json:"steps"`
+}
+
+type blockTrace struct {
+	Blocks map[string]blockEntry `json:"blocks"`
+}
+
+// traceBlocks projects a tln.Result's per-block step trace into the shared
+// serialization, returning the blocks map and the total step count. A nil
+// result yields an empty map.
+func traceBlocks(r *tln.Result) (map[string]blockEntry, int) {
 	blocks := map[string]blockEntry{}
 	totalSteps := 0
+	if r == nil {
+		return blocks, 0
+	}
 	for name, b := range r.Blocks {
 		be := blockEntry{}
 		for _, s := range b.Steps {
@@ -489,6 +507,15 @@ func formatResult(r *tln.Result) (string, string) {
 		}
 		blocks[name] = be
 	}
+	return blocks, totalSteps
+}
+
+// formatResult renders a workflow run as a human-readable summary
+// (Content) and a JSON payload (StructuredContent) carrying the
+// per-step trace. The summary is what the LLM sees; the structured
+// blob is for clients that want the raw step-by-step view.
+func formatResult(r *tln.Result) (string, string) {
+	blocks, totalSteps := traceBlocks(r)
 	summary := fmt.Sprintf("Workflow completed: %d block(s), %d step(s).", len(blocks), totalSteps)
 	if totalSteps == 0 {
 		summary = "Workflow executed (no steps)."
