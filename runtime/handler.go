@@ -245,7 +245,15 @@ func (h *handler) execCheck(req plugin.Request) plugin.Response {
 	// → run imperatively.
 	reactive, err := tln.HasReactiveRules(src, tln.WithFilename("check:"+req.ID))
 	if err == nil {
-		structured, _ := json.Marshal(map[string]any{"ok": true, "reactive": reactive})
+		result := map[string]any{"ok": true, "reactive": reactive}
+		// Surface the MCP tools this source calls so a caller (opentalon-agents)
+		// can persist a per-agent tool manifest for later API-migration queries.
+		// Best-effort: the source already compiled above, so extraction should
+		// not fail — if it somehow does, omit tools rather than reject the check.
+		if tools, terr := tln.ToolReferences(src, tln.WithFilename("check:"+req.ID)); terr == nil {
+			result["tools"] = tools
+		}
+		structured, _ := json.Marshal(result)
 		return plugin.Response{
 			CallID:            req.ID,
 			Content:           "ok: source is valid Tln.",

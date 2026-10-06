@@ -116,6 +116,10 @@ func TestExecuteCheck(t *testing.T) {
 	if !strings.Contains(resp.StructuredContent, `"ok":true`) {
 		t.Errorf("valid source structured content: %q", resp.StructuredContent)
 	}
+	// The tool manifest the source calls is surfaced for the caller to persist.
+	if !strings.Contains(resp.StructuredContent, `"tools":[{"server":"srv","tool":"tool"}]`) {
+		t.Errorf("valid source should carry the tool manifest, got: %q", resp.StructuredContent)
+	}
 
 	// Invalid source → no RPC error, but ok:false + diagnostics reported.
 	resp = h.ExecuteWithCallbacks(context.Background(), plugin.Request{ID: "c2", Action: "check", Args: map[string]string{"workflow": "workflow \"x\" {"}}, nil)
